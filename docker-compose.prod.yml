@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: postgresql://oracle_user:oracle_pass@timescaledb:5432/oracle_db?schema=public
+      SYMBOLS: BTC/USDT,ETH/USDT
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - oracle-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - oracle-network
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: oracle_user
+      POSTGRES_PASSWORD: oracle_pass
+      POSTGRES_DB: oracle_db
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oracle_user -d oracle_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - oracle-network
+
+volumes:
+  redis-data:
+  timescale-data:
+
+networks:
+  oracle-network:
+    driver: bridge

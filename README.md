@@ -13,7 +13,32 @@ Cryptocurrency price aggregation system that collects data from multiple exchang
 
 ## Quick Start
 
-### 1. Start Infrastructure
+### Option 1: Production (Docker Compose)
+
+```bash
+# Build and start all services
+docker-compose -f docker-compose.prod.yml up -d
+
+# Check service status
+docker-compose -f docker-compose.prod.yml ps
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f api
+
+# Initialize database (first time only)
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+
+# Setup TimescaleDB extensions (first time only)
+docker cp prisma/migrations/001_timescaledb_setup.sql $(docker-compose -f docker-compose.prod.yml ps -q timescaledb):/tmp/
+docker-compose -f docker-compose.prod.yml exec timescaledb psql -U oracle_user -d oracle_db -f /tmp/001_timescaledb_setup.sql
+
+# Test API
+curl http://localhost:3000/api/v1/market/health
+```
+
+### Option 2: Development
+
+#### 1. Start Infrastructure
 
 ```bash
 # Start Redis and TimescaleDB
@@ -23,13 +48,13 @@ docker-compose up -d
 docker-compose ps
 ```
 
-### 2. Install Dependencies
+#### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Setup Database
+#### 3. Setup Database
 
 ```bash
 # Generate Prisma client
@@ -39,21 +64,17 @@ npx prisma generate
 npx prisma migrate dev --name init
 
 # Setup TimescaleDB (hypertable, compression, continuous aggregates)
+docker cp prisma/migrations/001_timescaledb_setup.sql $(docker-compose ps -q timescaledb):/tmp/
 docker-compose exec timescaledb psql -U oracle_user -d oracle_db -f /tmp/001_timescaledb_setup.sql
 ```
 
-Copy the SQL file to container first:
-```bash
-docker cp prisma/migrations/001_timescaledb_setup.sql $(docker-compose ps -q timescaledb):/tmp/
-```
-
-### 4. Run Application
+#### 4. Run Application
 
 ```bash
-# Development
+# Development (with hot reload)
 npm run start:dev
 
-# Production
+# Production build
 npm run build
 npm run start:prod
 ```
