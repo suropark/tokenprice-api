@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { configuration } from './config/configuration';
 import { redisProvider } from './config/redis.config';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { redisProvider } from './config/redis.config';
       load: [configuration],
     }),
     ScheduleModule.forRoot(),
+    DatabaseModule,
   ],
   providers: [redisProvider],
   exports: ['REDIS_CLIENT'],
