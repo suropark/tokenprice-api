@@ -1,14 +1,24 @@
-import { Controller, Get, Query, ValidationPipe, Inject, NotFoundException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  ValidationPipe,
+  Inject,
+  NotFoundException,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { PrismaService } from '../database/prisma.service';
 import { OhlcvQueryDto } from './dto/ohlcv-query.dto';
 import { TickerQueryDto } from './dto/ticker-query.dto';
+import { FxRateService } from '../services/fx-rate.service';
+import { getExchangeMetadata, SYMBOLS } from '../config/symbols';
 
 @Controller('api/v1/market')
 export class MarketController {
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly prisma: PrismaService,
+    private readonly fxRateService: FxRateService,
   ) {}
 
   @Get('ohlcv')
@@ -81,43 +91,51 @@ export class MarketController {
   }
 
   @Get('ticker')
-  async getTicker(@Query(new ValidationPipe({ transform: true })) query: TickerQueryDto) {
-    const { symbol, exchange, includeExchanges } = query;
+  async getTicker(
+    @Query(new ValidationPipe({ transform: true })) query: TickerQueryDto,
+  ) {
+    const { base, exchange, quote, includePremium } = query;
 
-    // Case 1: Get specific exchange price
+    // Case 1: Specific exchange
     if (exchange) {
-      const price = await this.getExchangePrice(symbol, exchange);
-      if (!price) {
-        throw new NotFoundException(`Price not found for ${symbol} on ${exchange}`);
-      }
-      return price;
+      return this.getExchangePrice(base, exchange);
     }
 
-    // Case 2: Get all exchange prices
-    if (includeExchanges) {
-      return this.getAllExchangePrices(symbol);
+    // Case 2: Specific quote currency
+    if (quote) {
+      return this.getQuoteMarket(base, quote, includePremium);
     }
 
-    // Case 3: Get aggregated price (default)
-    const aggregated = await this.getExchangePrice(symbol, 'aggregated');
-    if (!aggregated) {
-      throw new NotFoundException(`Price not found for ${symbol}`);
-    }
-
-    return aggregated;
+    // Case 3: All markets (quote별로 분리)
+    return this.getAllMarkets(base, includePremium);
   }
 
-  private async getExchangePrice(symbol: string, exchange: string) {
-    const key = `candle:${symbol}:${exchange}`;
+  /**
+   * Get specific exchange price
+   */
+  private async getExchangePrice(base: string, exchange: string) {
+    const metadata = getExchangeMetadata(base, exchange);
+    if (!metadata) {
+      throw new NotFoundException(
+        `Exchange ${exchange} not found for ${base}`,
+      );
+    }
+
+    const { quote, pair } = metadata;
+    const key = `candle:${pair}:${exchange}`;
     const data = await this.redis.hgetall(key);
 
     if (!data || !data.c) {
-      return null;
+      throw new NotFoundException(
+        `Price not found for ${base} on ${exchange}`,
+      );
     }
 
     return {
-      symbol,
+      base,
       exchange,
+      quote,
+      pair,
       price: parseFloat(data.c),
       open: parseFloat(data.o),
       high: parseFloat(data.h),
@@ -127,43 +145,85 @@ export class MarketController {
     };
   }
 
-  private async getAllExchangePrices(symbol: string) {
-    const exchanges = ['binance', 'upbit', 'aggregated'];
-    const prices = await Promise.all(
-      exchanges.map((exchange) => this.getExchangePrice(symbol, exchange)),
-    );
+  /**
+   * Get aggregated price for specific quote market
+   */
+  private async getQuoteMarket(
+    base: string,
+    quote: string,
+    includePremium: boolean,
+  ) {
+    const key = `candle:${base}:${quote}:aggregated`;
+    const data = await this.redis.hgetall(key);
 
-    const result = {
-      symbol,
-      aggregated: null,
-      exchanges: {},
+    if (!data || !data.c) {
+      throw new NotFoundException(`Price not found for ${base}:${quote}`);
+    }
+
+    const result: any = {
+      base,
+      quote,
+      price: parseFloat(data.c),
+      open: parseFloat(data.o),
+      high: parseFloat(data.h),
+      low: parseFloat(data.l),
+      volume: data.v ? parseFloat(data.v) : 0,
+      timestamp: parseInt(data.t),
+      sourceCount: parseInt(data.sources || '1'),
     };
 
-    prices.forEach((price, index) => {
-      if (price) {
-        if (exchanges[index] === 'aggregated') {
-          result.aggregated = {
-            price: price.price,
-            open: price.open,
-            high: price.high,
-            low: price.low,
-            timestamp: price.timestamp,
-          };
-        } else {
-          result.exchanges[exchanges[index]] = {
-            price: price.price,
-            open: price.open,
-            high: price.high,
-            low: price.low,
-            volume: price.volume,
-            timestamp: price.timestamp,
-          };
+    // Add premium calculation if requested
+    if (includePremium && quote === 'KRW') {
+      try {
+        const usdtMarket = await this.getQuoteMarket(base, 'USDT', false);
+        const premium = await this.fxRateService.calculatePremium(
+          usdtMarket.price,
+          result.price,
+        );
+        if (premium) {
+          result.premium = premium.percentageString;
         }
+      } catch (error) {
+        // USDT market not available, skip premium
       }
-    });
+    }
 
-    if (!result.aggregated && Object.keys(result.exchanges).length === 0) {
-      throw new NotFoundException(`No price data found for ${symbol}`);
+    return result;
+  }
+
+  /**
+   * Get all markets (quote별 분리)
+   */
+  private async getAllMarkets(base: string, includePremium: boolean) {
+    const markets: any = {};
+
+    // Get each quote market separately
+    for (const quote of ['USDT', 'KRW']) {
+      try {
+        markets[quote] = await this.getQuoteMarket(base, quote, false);
+      } catch (error) {
+        // Market not available
+      }
+    }
+
+    if (Object.keys(markets).length === 0) {
+      throw new NotFoundException(`No price data found for ${base}`);
+    }
+
+    const result: any = { base, markets };
+
+    // Add premium if requested and both markets exist
+    if (includePremium && markets['USDT'] && markets['KRW']) {
+      const premium = await this.fxRateService.calculatePremium(
+        markets['USDT'].price,
+        markets['KRW'].price,
+      );
+      if (premium) {
+        result.premium = {
+          value: premium.percentageString,
+          note: 'KRW market premium vs USDT market',
+        };
+      }
     }
 
     return result;

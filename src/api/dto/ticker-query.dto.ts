@@ -1,17 +1,27 @@
-import { IsString, IsNotEmpty, IsOptional, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsBoolean,
+  IsIn,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class TickerQueryDto {
   @IsString()
   @IsNotEmpty()
-  symbol: string;
+  base: string; // BTC, ETH, ...
 
   @IsOptional()
   @IsString()
-  exchange?: string; // 'binance', 'upbit', or undefined for aggregated
+  exchange?: string; // 'binance', 'upbit' for specific exchange
+
+  @IsOptional()
+  @IsIn(['USDT', 'KRW'])
+  quote?: string; // Filter by quote currency
 
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
-  includeExchanges?: boolean; // Include all exchange prices
+  includePremium?: boolean; // Include kimchi premium calculation
 }
