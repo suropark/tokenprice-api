@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ohlcv1m {
+  time        DateTime @db.Timestamptz(6)
+  symbol      String   @db.Text
+  open        Decimal  @db.Decimal(20, 8)
+  high        Decimal  @db.Decimal(20, 8)
+  low         Decimal  @db.Decimal(20, 8)
+  close       Decimal  @db.Decimal(20, 8)
+  volume      Decimal  @default(0) @db.Decimal(30, 8)
+  quoteVolume Decimal  @default(0) @map("quote_volume") @db.Decimal(30, 8)
+  sourceCount Int      @default(0) @map("source_count")
+
+  @@id([time, symbol])
+  @@index([symbol, time])
+  @@map("ohlcv_1m")
+}
