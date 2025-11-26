@@ -124,31 +124,109 @@ npm run test:cov
 
 ## API Endpoints
 
-### Get OHLCV Data
+### Get Current Price (Ticker)
+
+**Get aggregated price (default)**
+```bash
+GET /api/v1/market/ticker?symbol=BTC/USDT
+
+# Response
+{
+  "symbol": "BTC/USDT",
+  "exchange": "aggregated",
+  "price": 43250.5,
+  "open": 43100.0,
+  "high": 43500.0,
+  "low": 43000.0,
+  "timestamp": 1704110400000
+}
 ```
+
+**Get specific exchange price**
+```bash
+GET /api/v1/market/ticker?symbol=BTC/USDT&exchange=binance
+
+# Response
+{
+  "symbol": "BTC/USDT",
+  "exchange": "binance",
+  "price": 43260.0,
+  "open": 43110.0,
+  "high": 43510.0,
+  "low": 43010.0,
+  "volume": 1234.5,
+  "timestamp": 1704110400000
+}
+```
+
+**Get all exchange prices**
+```bash
+GET /api/v1/market/ticker?symbol=BTC/USDT&includeExchanges=true
+
+# Response
+{
+  "symbol": "BTC/USDT",
+  "aggregated": {
+    "price": 43250.5,
+    "open": 43100.0,
+    "high": 43500.0,
+    "low": 43000.0,
+    "timestamp": 1704110400000
+  },
+  "exchanges": {
+    "binance": {
+      "price": 43260.0,
+      "open": 43110.0,
+      "high": 43510.0,
+      "low": 43010.0,
+      "volume": 1234.5,
+      "timestamp": 1704110400000
+    },
+    "upbit": {
+      "price": 43240.0,
+      "open": 43090.0,
+      "high": 43490.0,
+      "low": 42990.0,
+      "volume": 5678.9,
+      "timestamp": 1704110400000
+    }
+  }
+}
+```
+
+### Get OHLCV Data
+```bash
 GET /api/v1/market/ohlcv?symbol=BTC/USDT&from=1704110400&to=1704114000
 ```
 
 ### Get Supported Symbols
-```
+```bash
 GET /api/v1/market/symbols
 ```
 
 ### Health Check
-```
-GET /api/v1/health
+```bash
+GET /api/v1/market/health
 ```
 
 ## Architecture
 
 **Data Flow**:
 1. **Collection** (every 1 second): Fetch prices from exchanges → Aggregate → Update Redis
-2. **Persistence** (every 1 minute): Flush Redis candles → Bulk insert to TimescaleDB
-3. **Query**: Read historical data from DB + current candle from Redis
+   - Stores 3 keys per symbol: `candle:{symbol}:binance`, `candle:{symbol}:upbit`, `candle:{symbol}:aggregated`
+2. **Persistence** (every 1 minute): Flush aggregated candles → Bulk insert to TimescaleDB
+   - Only aggregated prices stored in DB (not per-exchange)
+   - All Redis keys cleaned after successful DB write
+3. **Query**:
+   - Historical: Read from TimescaleDB (aggregated only)
+   - Current: Read from Redis (per-exchange or aggregated)
 
 **Key Features**:
 - Multi-source price aggregation (VWAP/Median)
-- Hot/Cold storage (Redis + TimescaleDB)
+- Hot/Cold storage strategy:
+  - **Redis (hot)**: All exchange prices + aggregated (current minute)
+  - **TimescaleDB (cold)**: Aggregated prices only (historical)
+- Per-exchange price tracking in real-time
 - Continuous aggregates for higher timeframes (5m, 1h)
 - Automatic compression and retention policies
 
