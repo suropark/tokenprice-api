@@ -131,70 +131,88 @@ npm run test:cov
 
 ### Get Current Price (Ticker)
 
-**Get aggregated price (default)**
+**Get all markets (quote-separated)**
 ```bash
-GET /api/v1/market/ticker?symbol=BTC/USDT
+GET /api/v1/market/ticker?base=BTC
 
 # Response
 {
-  "symbol": "BTC/USDT",
-  "exchange": "aggregated",
-  "price": 43250.5,
-  "open": 43100.0,
-  "high": 43500.0,
-  "low": 43000.0,
-  "timestamp": 1704110400000
+  "base": "BTC",
+  "markets": {
+    "USDT": {
+      "base": "BTC",
+      "quote": "USDT",
+      "price": 43000.5,
+      "open": 42800.0,
+      "high": 43200.0,
+      "low": 42700.0,
+      "volume": 1234.5,
+      "timestamp": 1704110400000,
+      "sourceCount": 1
+    },
+    "KRW": {
+      "base": "BTC",
+      "quote": "KRW",
+      "price": 58500000,
+      "open": 58200000,
+      "high": 58800000,
+      "low": 58000000,
+      "volume": 45.2,
+      "timestamp": 1704110400000,
+      "sourceCount": 1
+    }
+  }
 }
 ```
 
-**Get specific exchange price**
+**Get specific quote market**
 ```bash
-GET /api/v1/market/ticker?symbol=BTC/USDT&exchange=binance
+GET /api/v1/market/ticker?base=BTC&quote=USDT
 
 # Response
 {
-  "symbol": "BTC/USDT",
+  "base": "BTC",
+  "quote": "USDT",
+  "price": 43000.5,
+  "open": 42800.0,
+  "high": 43200.0,
+  "low": 42700.0,
+  "volume": 1234.5,
+  "timestamp": 1704110400000,
+  "sourceCount": 1
+}
+```
+
+**Get specific exchange**
+```bash
+GET /api/v1/market/ticker?base=BTC&exchange=binance
+
+# Response
+{
+  "base": "BTC",
   "exchange": "binance",
-  "price": 43260.0,
-  "open": 43110.0,
-  "high": 43510.0,
-  "low": 43010.0,
+  "quote": "USDT",
+  "pair": "BTC/USDT",
+  "price": 43000.5,
   "volume": 1234.5,
   "timestamp": 1704110400000
 }
 ```
 
-**Get all exchange prices**
+**Get with kimchi premium**
 ```bash
-GET /api/v1/market/ticker?symbol=BTC/USDT&includeExchanges=true
+GET /api/v1/market/ticker?base=BTC&includePremium=true
 
 # Response
 {
-  "symbol": "BTC/USDT",
-  "aggregated": {
-    "price": 43250.5,
-    "open": 43100.0,
-    "high": 43500.0,
-    "low": 43000.0,
-    "timestamp": 1704110400000
+  "base": "BTC",
+  "markets": {
+    "USDT": { "price": 43000.5, ... },
+    "KRW": { "price": 58500000, ... }
   },
-  "exchanges": {
-    "binance": {
-      "price": 43260.0,
-      "open": 43110.0,
-      "high": 43510.0,
-      "low": 43010.0,
-      "volume": 1234.5,
-      "timestamp": 1704110400000
-    },
-    "upbit": {
-      "price": 43240.0,
-      "open": 43090.0,
-      "high": 43490.0,
-      "low": 42990.0,
-      "volume": 5678.9,
-      "timestamp": 1704110400000
-    }
+  "premium": {
+    "value": "+1.52%",
+    "note": "KRW market premium vs USDT market"
   }
 }
 ```
