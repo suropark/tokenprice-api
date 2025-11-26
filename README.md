@@ -5,11 +5,16 @@ Cryptocurrency price aggregation system that collects data from multiple exchang
 ## Tech Stack
 
 - **Runtime**: Node.js 20+
-- **Framework**: NestJS 10
+- **Framework**: NestJS 10 with Fastify adapter
 - **Language**: TypeScript 5
 - **Database**: PostgreSQL 15 + TimescaleDB 2.13+
 - **Cache**: Redis 7
 - **ORM**: Prisma 5
+
+**Performance Optimizations**:
+- **Fastify** instead of Express: 2-3x faster HTTP processing, optimized JSON serialization
+- **Direct exchange APIs**: No CCXT overhead
+- **Minimal dependencies**: Reduced bundle size and startup time
 
 ## Quick Start
 
