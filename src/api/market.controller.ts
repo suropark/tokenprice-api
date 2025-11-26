@@ -1,7 +1,8 @@
-import { Controller, Get, Query, ValidationPipe, Inject } from '@nestjs/common';
+import { Controller, Get, Query, ValidationPipe, Inject, NotFoundException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { PrismaService } from '../database/prisma.service';
 import { OhlcvQueryDto } from './dto/ohlcv-query.dto';
+import { TickerQueryDto } from './dto/ticker-query.dto';
 
 @Controller('api/v1/market')
 export class MarketController {
@@ -77,6 +78,95 @@ export class MarketController {
       symbols: symbols.map((s) => s.symbol),
       count: symbols.length,
     };
+  }
+
+  @Get('ticker')
+  async getTicker(@Query(new ValidationPipe({ transform: true })) query: TickerQueryDto) {
+    const { symbol, exchange, includeExchanges } = query;
+
+    // Case 1: Get specific exchange price
+    if (exchange) {
+      const price = await this.getExchangePrice(symbol, exchange);
+      if (!price) {
+        throw new NotFoundException(`Price not found for ${symbol} on ${exchange}`);
+      }
+      return price;
+    }
+
+    // Case 2: Get all exchange prices
+    if (includeExchanges) {
+      return this.getAllExchangePrices(symbol);
+    }
+
+    // Case 3: Get aggregated price (default)
+    const aggregated = await this.getExchangePrice(symbol, 'aggregated');
+    if (!aggregated) {
+      throw new NotFoundException(`Price not found for ${symbol}`);
+    }
+
+    return aggregated;
+  }
+
+  private async getExchangePrice(symbol: string, exchange: string) {
+    const key = `candle:${symbol}:${exchange}`;
+    const data = await this.redis.hgetall(key);
+
+    if (!data || !data.c) {
+      return null;
+    }
+
+    return {
+      symbol,
+      exchange,
+      price: parseFloat(data.c),
+      open: parseFloat(data.o),
+      high: parseFloat(data.h),
+      low: parseFloat(data.l),
+      volume: data.v ? parseFloat(data.v) : undefined,
+      timestamp: parseInt(data.t),
+    };
+  }
+
+  private async getAllExchangePrices(symbol: string) {
+    const exchanges = ['binance', 'upbit', 'aggregated'];
+    const prices = await Promise.all(
+      exchanges.map((exchange) => this.getExchangePrice(symbol, exchange)),
+    );
+
+    const result = {
+      symbol,
+      aggregated: null,
+      exchanges: {},
+    };
+
+    prices.forEach((price, index) => {
+      if (price) {
+        if (exchanges[index] === 'aggregated') {
+          result.aggregated = {
+            price: price.price,
+            open: price.open,
+            high: price.high,
+            low: price.low,
+            timestamp: price.timestamp,
+          };
+        } else {
+          result.exchanges[exchanges[index]] = {
+            price: price.price,
+            open: price.open,
+            high: price.high,
+            low: price.low,
+            volume: price.volume,
+            timestamp: price.timestamp,
+          };
+        }
+      }
+    });
+
+    if (!result.aggregated && Object.keys(result.exchanges).length === 0) {
+      throw new NotFoundException(`No price data found for ${symbol}`);
+    }
+
+    return result;
   }
 
   @Get('health')

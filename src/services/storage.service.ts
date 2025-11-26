@@ -15,7 +15,8 @@ export class StorageService {
   @Cron('5 * * * * *') // Every minute at :05 seconds
   async flushToDatabase() {
     try {
-      const keys = await this.redis.keys('candle:*');
+      // Only flush aggregated candles to database
+      const keys = await this.redis.keys('candle:*:aggregated');
 
       if (keys.length === 0) {
         this.logger.debug('No candles to flush');
@@ -43,8 +44,8 @@ export class StorageService {
       return;
     }
 
-    // 2. Extract symbol from key
-    const symbol = key.replace('candle:', '');
+    // 2. Extract symbol from key (remove 'candle:' prefix and ':aggregated' suffix)
+    const symbol = key.replace('candle:', '').replace(':aggregated', '');
 
     // 3. Calculate bucket time (rounded to minute)
     const bucketTime = new Date();
@@ -77,10 +78,13 @@ export class StorageService {
         },
       });
 
-      // 5. Delete Redis key (start new candle)
-      await this.redis.del(key);
+      // 5. Delete all candles for this symbol (aggregated + exchange-specific)
+      const allKeys = await this.redis.keys(`candle:${symbol}:*`);
+      if (allKeys.length > 0) {
+        await this.redis.del(...allKeys);
+      }
 
-      this.logger.debug(`Flushed ${symbol} candle`);
+      this.logger.debug(`Flushed ${symbol} candle (${allKeys.length} keys deleted)`);
     } catch (error) {
       this.logger.error(`Failed to flush ${symbol}: ${error.message}`);
       // Don't delete Redis key if DB write fails
