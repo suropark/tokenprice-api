@@ -2,6 +2,12 @@
 
 Cryptocurrency price aggregation system that collects data from multiple exchanges (Binance, Upbit), aggregates them using statistical algorithms, and provides OHLCV time-series data through REST API.
 
+## Quick Deploy
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/your-repo/tokenprice-api)
+
+**Railway Deployment**: See [RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md) for detailed instructions.
+
 ## Tech Stack
 
 - **Runtime**: Node.js 20+
