@@ -4,15 +4,17 @@ Cryptocurrency price aggregation system that collects data from multiple exchang
 
 ## Tech Stack
 
-- **Runtime**: Node.js 20+
+- **Runtime**: Bun 1.3+ (for development and testing)
 - **Framework**: NestJS 10 with Fastify adapter
 - **Language**: TypeScript 5
 - **Database**: PostgreSQL 15 + TimescaleDB 2.13+
 - **Cache**: Redis 7
-- **ORM**: Prisma 5
+- **ORM**: Drizzle ORM 0.36+
 
 **Performance Optimizations**:
+- **Bun**: 3-4x faster than Node.js for package management and testing
 - **Fastify** instead of Express: 2-3x faster HTTP processing, optimized JSON serialization
+- **Drizzle ORM**: Type-safe SQL queries with minimal overhead
 - **Direct exchange APIs**: No CCXT overhead
 - **Minimal dependencies**: Reduced bundle size and startup time
 
@@ -56,21 +58,27 @@ docker-compose ps
 #### 2. Install Dependencies
 
 ```bash
+# Install Bun (if not already installed)
+curl -fsSL https://bun.sh/install | bash
+
+# Install dependencies
+bun install
+# or
 npm install
 ```
 
 #### 3. Setup Database
 
 ```bash
-# Generate Prisma client
-npx prisma generate
+# Generate Drizzle migrations
+bun db:generate
 
-# Run migrations
-npx prisma migrate dev --name init
+# Push schema to database
+bun db:push
 
-# Setup TimescaleDB (hypertable, compression, continuous aggregates)
-docker cp prisma/migrations/001_timescaledb_setup.sql $(docker-compose ps -q timescaledb):/tmp/
-docker-compose exec timescaledb psql -U oracle_user -d oracle_db -f /tmp/001_timescaledb_setup.sql
+# Setup TimescaleDB hypertable (run once)
+# This is automatically handled by DrizzleService.enableHypertable()
+# Or manually via SQL if needed
 ```
 
 #### 4. Run Application
@@ -81,7 +89,7 @@ npm run start:dev
 
 # Production build
 npm run build
-npm run start:prod
+bun run start:prod
 ```
 
 ## Configuration
@@ -102,29 +110,48 @@ Key environment variables:
 ```
 src/
 ├── clients/         # Exchange API clients (Binance, Upbit)
+│   ├── binance.client.ts       # Binance API (spot prices, historical data)
+│   ├── upbit.client.ts         # Upbit API (KRW markets)
+│   └── *.test.ts              # Client tests
 ├── config/          # Configuration and Redis setup
-├── database/        # Prisma service
-├── services/        # Business logic (Aggregation, Collector, Storage)
+├── database/        # Database layer
+│   ├── schema.ts              # Drizzle ORM schema
+│   ├── drizzle.service.ts     # DB connection & TimescaleDB setup
+│   └── database.module.ts     # Database module
+├── services/        # Business logic
+│   ├── aggregation.service.ts # Price aggregation (VWAP, median)
+│   ├── collector.service.ts   # Real-time price collection
+│   ├── storage.service.ts     # Periodic DB flushing
+│   ├── backfill.service.ts    # Historical data backfill
+│   └── fx-rate.service.ts     # Currency conversion & premium calc
 ├── api/             # REST API controllers
+│   ├── market.controller.ts   # Market data endpoints
+│   ├── backfill.controller.ts # Backfill endpoints
+│   └── dto/                   # Request/response DTOs
+├── scripts/         # CLI scripts
+│   └── backfill.ts            # Backfill CLI command
 ├── app.module.ts    # Root module
 └── main.ts          # Entry point
 
-prisma/
-├── schema.prisma    # Database schema
-└── migrations/      # Migration files
+drizzle/             # Drizzle migrations
+drizzle.config.ts    # Drizzle configuration
 ```
 
 ## Testing
 
 ```bash
-# Unit tests
-npm run test
+# Run all tests with Bun
+bun test
 
-# E2E tests
-npm run test:e2e
+# Watch mode
+bun test --watch
 
 # Coverage
-npm run test:cov
+bun test --coverage
+
+# Run specific test files
+bun test src/clients/binance.client.test.ts
+bun test src/services/backfill.service.test.ts
 ```
 
 ## API Endpoints
@@ -230,6 +257,55 @@ GET /api/v1/market/symbols
 ### Health Check
 ```bash
 GET /api/v1/market/health
+```
+
+### Backfill Historical Data
+
+**Backfill last 7 days**
+```bash
+POST /api/v1/backfill?symbol=BTC&days=7
+
+# Response
+{
+  "base": "BTC",
+  "startDate": "2024-11-29T00:00:00.000Z",
+  "endDate": "2024-12-06T00:00:00.000Z",
+  "totalCandles": 10080,
+  "processedCandles": 10080,
+  "status": "completed"
+}
+```
+
+**Backfill last 24 hours**
+```bash
+POST /api/v1/backfill?symbol=ETH&hours=24
+```
+
+**Backfill specific date range**
+```bash
+POST /api/v1/backfill?symbol=BTC&from=2024-01-01&to=2024-01-31
+```
+
+**Backfill with specific exchanges**
+```bash
+POST /api/v1/backfill?symbol=BTC&days=7&exchanges=binance,upbit
+```
+
+### CLI Commands
+
+**Backfill using CLI**
+```bash
+# Backfill last 7 days
+bun backfill --symbol BTC --days 7
+
+# Backfill last 24 hours
+bun backfill --symbol ETH --hours 24
+
+# Backfill specific date range
+bun backfill --symbol BTC --from 2024-01-01 --to 2024-01-31
+
+# Backfill with specific exchanges
+bun backfill --symbol BTC --days 365 --exchanges binance,upbit
 ```
 
 ## Architecture

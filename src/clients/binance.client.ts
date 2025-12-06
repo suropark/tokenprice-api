@@ -7,6 +7,16 @@ export interface PriceData {
   timestamp: number;
 }
 
+export interface OHLCVData {
+  time: number; // Unix timestamp in milliseconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  quoteVolume: number;
+}
+
 @Injectable()
 export class BinanceClient {
   private readonly logger = new Logger(BinanceClient.name);
@@ -60,5 +70,97 @@ export class BinanceClient {
 
     await Promise.all(promises);
     return results;
+  }
+
+  /**
+   * Get historical OHLCV data (klines)
+   * @param symbol - Trading pair (e.g., 'BTC/USDT')
+   * @param interval - Kline interval ('1m', '5m', '1h', '1d', etc.)
+   * @param startTime - Start time in milliseconds
+   * @param endTime - End time in milliseconds
+   * @param limit - Max number of candles (default 1000, max 1000)
+   */
+  async getHistoricalData(
+    symbol: string,
+    interval: string = '1m',
+    startTime: number,
+    endTime: number,
+    limit: number = 1000,
+  ): Promise<OHLCVData[]> {
+    try {
+      const normalized = this.normalizeSymbol(symbol);
+      const { data } = await this.axios.get('/api/v3/klines', {
+        params: {
+          symbol: normalized,
+          interval,
+          startTime,
+          endTime,
+          limit,
+        },
+      });
+
+      return data.map((candle: any[]) => ({
+        time: candle[0], // Open time
+        open: parseFloat(candle[1]),
+        high: parseFloat(candle[2]),
+        low: parseFloat(candle[3]),
+        close: parseFloat(candle[4]),
+        volume: parseFloat(candle[5]),
+        quoteVolume: parseFloat(candle[7]),
+      }));
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch historical data for ${symbol}: ${error.message}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Get historical data in batches for a date range
+   * Binance limits to 1000 candles per request
+   */
+  async getHistoricalDataRange(
+    symbol: string,
+    startTime: number,
+    endTime: number,
+  ): Promise<OHLCVData[]> {
+    const allData: OHLCVData[] = [];
+    const batchSize = 1000;
+    const oneMinute = 60 * 1000;
+    let currentStart = startTime;
+
+    while (currentStart < endTime) {
+      const currentEnd = Math.min(
+        currentStart + batchSize * oneMinute,
+        endTime,
+      );
+
+      const data = await this.getHistoricalData(
+        symbol,
+        '1m',
+        currentStart,
+        currentEnd,
+        batchSize,
+      );
+
+      if (data.length === 0) {
+        break;
+      }
+
+      allData.push(...data);
+
+      // Move to next batch
+      currentStart = data[data.length - 1].time + oneMinute;
+
+      // Rate limiting: wait 100ms between requests
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      this.logger.debug(
+        `Fetched ${data.length} candles for ${symbol}, total: ${allData.length}`,
+      );
+    }
+
+    return allData;
   }
 }

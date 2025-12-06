@@ -7,7 +7,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import Redis from 'ioredis';
-import { PrismaService } from '../database/prisma.service';
+import { DrizzleService } from '../database/drizzle.service';
+import { ohlcv1m } from '../database/schema';
+import { eq, and, gte, lte, asc, sql } from 'drizzle-orm';
 import { OhlcvQueryDto } from './dto/ohlcv-query.dto';
 import { TickerQueryDto } from './dto/ticker-query.dto';
 import { FxRateService } from '../services/fx-rate.service';
@@ -17,7 +19,7 @@ import { getExchangeMetadata, SYMBOLS } from '../config/symbols';
 export class MarketController {
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    private readonly prisma: PrismaService,
+    private readonly drizzle: DrizzleService,
     private readonly fxRateService: FxRateService,
   ) {}
 
@@ -26,16 +28,17 @@ export class MarketController {
     const { symbol, from, to } = query;
 
     // 1. Get historical data from DB
-    const historical = await this.prisma.ohlcv1m.findMany({
-      where: {
-        symbol,
-        time: {
-          gte: new Date(from * 1000),
-          lte: new Date(to * 1000),
-        },
-      },
-      orderBy: { time: 'asc' },
-    });
+    const historical = await this.drizzle.db
+      .select()
+      .from(ohlcv1m)
+      .where(
+        and(
+          eq(ohlcv1m.symbol, symbol),
+          gte(ohlcv1m.time, new Date(from * 1000)),
+          lte(ohlcv1m.time, new Date(to * 1000))
+        )
+      )
+      .orderBy(asc(ohlcv1m.time));
 
     // 2. Format historical data
     let result = historical.map((h) => ({
@@ -77,12 +80,9 @@ export class MarketController {
 
   @Get('symbols')
   async getSymbols() {
-    const symbols = await this.prisma.ohlcv1m.groupBy({
-      by: ['symbol'],
-      _count: {
-        symbol: true,
-      },
-    });
+    const symbols = await this.drizzle.db
+      .selectDistinct({ symbol: ohlcv1m.symbol })
+      .from(ohlcv1m);
 
     return {
       symbols: symbols.map((s) => s.symbol),
@@ -233,7 +233,7 @@ export class MarketController {
   async getHealth() {
     try {
       // Check database
-      await this.prisma.$queryRaw`SELECT 1`;
+      await this.drizzle.db.execute(sql`SELECT 1`);
 
       // Check Redis
       await this.redis.ping();
