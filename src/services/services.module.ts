@@ -3,6 +3,7 @@ import { AggregationService } from './aggregation.service';
 import { CollectorService } from './collector.service';
 import { StorageService } from './storage.service';
 import { FxRateService } from './fx-rate.service';
+import { BackfillService } from './backfill.service';
 import { ExchangeModule } from '../clients/exchange.module';
 
 @Module({
@@ -12,7 +13,14 @@ import { ExchangeModule } from '../clients/exchange.module';
     CollectorService,
     StorageService,
     FxRateService,
+    BackfillService,
   ],
-  exports: [AggregationService, CollectorService, StorageService, FxRateService],
+  exports: [
+    AggregationService,
+    CollectorService,
+    StorageService,
+    FxRateService,
+    BackfillService,
+  ],
 })
 export class ServicesModule {}
