@@ -1,7 +1,9 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import Redis from 'ioredis';
-import { PrismaService } from '../database/prisma.service';
+import { DrizzleService } from '../database/drizzle.service';
+import { ohlcv1m } from '../database/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import { SYMBOLS } from '../config/symbols';
 
 @Injectable()
@@ -10,7 +12,7 @@ export class StorageService {
 
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    private readonly prisma: PrismaService,
+    private readonly drizzle: DrizzleService,
   ) {}
 
   @Cron('5 * * * * *') // Every minute at :05 seconds
@@ -63,33 +65,27 @@ export class StorageService {
     // 4. Get source count from data
     const sourceCount = parseInt(data.sources || '1', 10);
 
-    // 5. Upsert to database
+    // 5. Upsert to database using Drizzle
     try {
-      await this.prisma.ohlcv1m.upsert({
-        where: {
-          time_symbol: {
-            time: bucketTime,
-            symbol,
-          },
-        },
-        create: {
+      await this.drizzle.db
+        .insert(ohlcv1m)
+        .values({
           time: bucketTime,
           symbol,
-          open: parseFloat(data.o),
-          high: parseFloat(data.h),
-          low: parseFloat(data.l),
-          close: parseFloat(data.c),
-          volume: 0,
-          quoteVolume: 0,
-          sourceCount,
-        },
-        update: {
-          close: parseFloat(data.c),
-          high: parseFloat(data.h),
-          low: parseFloat(data.l),
-          sourceCount,
-        },
-      });
+          open: data.o,
+          high: data.h,
+          low: data.l,
+          close: data.c,
+        } as any)
+        .onConflictDoUpdate({
+          target: [ohlcv1m.time, ohlcv1m.symbol],
+          set: {
+            close: sql.raw(`'${data.c}'`),
+            high: sql`GREATEST(ohlcv_1m.high, '${sql.raw(data.h)}')`,
+            low: sql`LEAST(ohlcv_1m.low, '${sql.raw(data.l)}')`,
+            sourceCount: sourceCount,
+          } as any,
+        });
 
       // 6. Delete all candles for this base (all quotes + exchanges)
       // This includes: candle:BTC:USDT:aggregated, candle:BTC:KRW:aggregated,
