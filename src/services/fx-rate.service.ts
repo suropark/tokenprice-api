@@ -64,12 +64,7 @@ export class FxRateService {
     };
   }
 
-  private async setRate(
-    from: string,
-    to: string,
-    rate: number,
-    source: string,
-  ) {
+  private async setRate(from: string, to: string, rate: number, source: string) {
     await this.redis.hset(`fx:${from}:${to}`, {
       rate: rate.toString(),
       timestamp: Date.now().toString(),

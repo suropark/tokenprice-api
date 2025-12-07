@@ -109,9 +109,7 @@ export class BinanceClient {
         quoteVolume: parseFloat(candle[7]),
       }));
     } catch (error) {
-      this.logger.error(
-        `Failed to fetch historical data for ${symbol}: ${error.message}`,
-      );
+      this.logger.error(`Failed to fetch historical data for ${symbol}: ${error.message}`);
       return [];
     }
   }
@@ -131,18 +129,9 @@ export class BinanceClient {
     let currentStart = startTime;
 
     while (currentStart < endTime) {
-      const currentEnd = Math.min(
-        currentStart + batchSize * oneMinute,
-        endTime,
-      );
+      const currentEnd = Math.min(currentStart + batchSize * oneMinute, endTime);
 
-      const data = await this.getHistoricalData(
-        symbol,
-        '1m',
-        currentStart,
-        currentEnd,
-        batchSize,
-      );
+      const data = await this.getHistoricalData(symbol, '1m', currentStart, currentEnd, batchSize);
 
       if (data.length === 0) {
         break;
@@ -156,9 +145,7 @@ export class BinanceClient {
       // Rate limiting: wait 100ms between requests
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      this.logger.debug(
-        `Fetched ${data.length} candles for ${symbol}, total: ${allData.length}`,
-      );
+      this.logger.debug(`Fetched ${data.length} candles for ${symbol}, total: ${allData.length}`);
     }
 
     return allData;

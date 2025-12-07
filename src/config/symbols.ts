@@ -75,10 +75,7 @@ export function getAllSymbolPairs(): string[] {
   return pairs;
 }
 
-export function getMarketExchanges(
-  base: string,
-  quote: string,
-): ExchangeConfig[] {
+export function getMarketExchanges(base: string, quote: string): ExchangeConfig[] {
   const symbol = getSymbolConfig(base);
   return symbol?.markets[quote]?.exchanges || [];
 }

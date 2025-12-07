@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Post,
-  Query,
-  ValidationPipe,
-  BadRequestException,
-} from '@nestjs/common';
+import { Controller, Post, Query, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { BackfillService, BackfillProgress } from '../services/backfill.service';
 import { BackfillQueryDto } from './dto/backfill-query.dto';
 
@@ -31,9 +25,7 @@ export class BackfillController {
 
     // Validate input
     if (!days && !hours && (!from || !to)) {
-      throw new BadRequestException(
-        'Either days, hours, or from/to must be specified',
-      );
+      throw new BadRequestException('Either days, hours, or from/to must be specified');
     }
 
     if ((from && !to) || (!from && to)) {
@@ -42,17 +34,9 @@ export class BackfillController {
 
     try {
       if (days) {
-        return await this.backfillService.backfillLastDays(
-          symbol,
-          days,
-          exchangeList,
-        );
+        return await this.backfillService.backfillLastDays(symbol, days, exchangeList);
       } else if (hours) {
-        return await this.backfillService.backfillLastHours(
-          symbol,
-          hours,
-          exchangeList,
-        );
+        return await this.backfillService.backfillLastHours(symbol, hours, exchangeList);
       } else if (from && to) {
         return await this.backfillService.backfill({
           base: symbol,

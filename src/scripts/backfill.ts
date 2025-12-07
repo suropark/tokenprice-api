@@ -9,11 +9,13 @@
  */
 
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../app.module';
+import { BackfillModule } from './backfill.module';
 import { BackfillService } from '../services/backfill.service';
 
 async function bootstrap() {
-  const app = await NestFactory.createApplicationContext(AppModule, {
+  // Use BackfillModule instead of AppModule to avoid loading unnecessary services
+  // (Redis, CollectorService, StorageService flush, etc.)
+  const app = await NestFactory.createApplicationContext(BackfillModule, {
     logger: ['error', 'warn', 'log'],
   });
 

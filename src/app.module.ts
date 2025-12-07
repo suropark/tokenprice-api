@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { configuration } from './config/configuration';
-import { redisProvider } from './config/redis.config';
+import { RedisModule } from './config/redis.module';
 import { DatabaseModule } from './database/database.module';
 import { ServicesModule } from './services/services.module';
 import { ApiModule } from './api/api.module';
@@ -14,11 +14,10 @@ import { ApiModule } from './api/api.module';
       load: [configuration],
     }),
     ScheduleModule.forRoot(),
+    RedisModule,
     DatabaseModule,
     ServicesModule,
     ApiModule,
   ],
-  providers: [redisProvider],
-  exports: ['REDIS_CLIENT'],
 })
 export class AppModule {}

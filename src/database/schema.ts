@@ -1,12 +1,4 @@
-import {
-  pgTable,
-  timestamp,
-  text,
-  decimal,
-  integer,
-  index,
-  primaryKey,
-} from 'drizzle-orm/pg-core';
+import { pgTable, timestamp, text, decimal, integer, index, primaryKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -33,7 +25,7 @@ export const ohlcv1m = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.time, table.symbol] }),
     symbolTimeIdx: index('ohlcv_1m_symbol_time_idx').on(table.symbol, table.time),
-  })
+  }),
 );
 
 // Type inference for insert and select operations

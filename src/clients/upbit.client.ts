@@ -84,11 +84,7 @@ export class UpbitClient {
    * @param to - End time in ISO 8601 format (optional, defaults to now)
    * @param count - Number of candles (max 200)
    */
-  async getHistoricalData(
-    symbol: string,
-    to?: string,
-    count: number = 200,
-  ): Promise<OHLCVData[]> {
+  async getHistoricalData(symbol: string, to?: string, count: number = 200): Promise<OHLCVData[]> {
     try {
       const market = this.normalizeSymbol(symbol);
       const params: any = { market, count };
@@ -108,9 +104,7 @@ export class UpbitClient {
         quoteVolume: candle.candle_acc_trade_price,
       }));
     } catch (error) {
-      this.logger.error(
-        `Failed to fetch historical data for ${symbol}: ${error.message}`,
-      );
+      this.logger.error(`Failed to fetch historical data for ${symbol}: ${error.message}`);
       return [];
     }
   }
@@ -155,9 +149,7 @@ export class UpbitClient {
       // Rate limiting: wait 100ms between requests
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      this.logger.debug(
-        `Fetched ${data.length} candles for ${symbol}, total: ${allData.length}`,
-      );
+      this.logger.debug(`Fetched ${data.length} candles for ${symbol}, total: ${allData.length}`);
     }
 
     // Sort by time ascending

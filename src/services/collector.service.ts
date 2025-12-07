@@ -4,59 +4,144 @@ import Redis from 'ioredis';
 import { BinanceClient } from '../clients/binance.client';
 import { UpbitClient } from '../clients/upbit.client';
 import { AggregationService } from './aggregation.service';
-import { SYMBOLS, getMarketExchanges } from '../config/symbols';
+import { SYMBOLS } from '../config/symbols';
+
+export interface CollectionStatus {
+  isRunning: boolean;
+  lastCollectionTime: number | null;
+  symbols: Record<
+    string,
+    {
+      lastCollectionTime: number | null;
+      markets: Record<
+        string,
+        {
+          lastCollectionTime: number | null;
+          exchanges: Record<
+            string,
+            {
+              lastCollectionTime: number | null;
+              lastError?: string;
+              errorCount: number;
+            }
+          >;
+        }
+      >;
+    }
+  >;
+  totalErrors: number;
+}
 
 @Injectable()
 export class CollectorService implements OnModuleInit {
   private readonly logger = new Logger(CollectorService.name);
+  private collectionStatus: CollectionStatus = {
+    isRunning: false,
+    lastCollectionTime: null,
+    symbols: {},
+    totalErrors: 0,
+  };
 
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly binance: BinanceClient,
     private readonly upbit: UpbitClient,
     private readonly aggregator: AggregationService,
-  ) {}
+  ) {
+    // Initialize status for all symbols
+    for (const symbolConfig of SYMBOLS) {
+      this.collectionStatus.symbols[symbolConfig.base] = {
+        lastCollectionTime: null,
+        markets: {},
+      };
+      for (const [quote, marketConfig] of Object.entries(symbolConfig.markets)) {
+        this.collectionStatus.symbols[symbolConfig.base].markets[quote] = {
+          lastCollectionTime: null,
+          exchanges: {},
+        };
+        for (const exchangeConfig of marketConfig.exchanges) {
+          this.collectionStatus.symbols[symbolConfig.base].markets[quote].exchanges[
+            exchangeConfig.name
+          ] = {
+            lastCollectionTime: null,
+            errorCount: 0,
+          };
+        }
+      }
+    }
+  }
 
   onModuleInit() {
     const bases = SYMBOLS.map((s) => s.base).join(', ');
     this.logger.log(`📊 Initialized with symbols: ${bases}`);
   }
 
+  /**
+   * Get current collection status
+   */
+  public getStatus(): CollectionStatus {
+    const status: CollectionStatus = {
+      isRunning: this.collectionStatus.isRunning,
+      lastCollectionTime: this.collectionStatus.lastCollectionTime,
+      symbols: JSON.parse(JSON.stringify(this.collectionStatus.symbols)),
+      totalErrors: this.collectionStatus.totalErrors,
+    };
+    return status;
+  }
+
   @Cron(CronExpression.EVERY_SECOND)
   async collectPrices() {
-    for (const symbolConfig of SYMBOLS) {
-      try {
-        await this.collectSymbol(symbolConfig);
-      } catch (error) {
-        this.logger.error(
-          `Failed to collect ${symbolConfig.base}: ${error.message}`,
-        );
+    this.collectionStatus.isRunning = true;
+    const startTime = Date.now();
+
+    try {
+      for (const symbolConfig of SYMBOLS) {
+        try {
+          await this.collectSymbol(symbolConfig);
+        } catch (error) {
+          this.logger.error(`Failed to collect ${symbolConfig.base}: ${error.message}`);
+          this.collectionStatus.totalErrors++;
+        }
       }
+      this.collectionStatus.lastCollectionTime = startTime;
+    } catch (error) {
+      this.logger.error(`Collection cycle failed: ${error.message}`);
+      this.collectionStatus.totalErrors++;
+    } finally {
+      this.collectionStatus.isRunning = false;
     }
   }
 
-  private async collectSymbol(symbolConfig: typeof SYMBOLS[0]) {
+  private async collectSymbol(symbolConfig: (typeof SYMBOLS)[0]) {
     const { base, markets } = symbolConfig;
+    const symbolStatus = this.collectionStatus.symbols[base];
+    const symbolStartTime = Date.now();
 
     // Collect for each quote market separately
     for (const [quote, marketConfig] of Object.entries(markets)) {
       try {
         await this.collectMarket(base, quote, marketConfig);
+        if (symbolStatus.markets[quote]) {
+          symbolStatus.markets[quote].lastCollectionTime = symbolStartTime;
+        }
       } catch (error) {
-        this.logger.error(
-          `Failed to collect ${base}:${quote}: ${error.message}`,
-        );
+        this.logger.error(`Failed to collect ${base}:${quote}: ${error.message}`);
+        this.collectionStatus.totalErrors++;
       }
     }
+
+    symbolStatus.lastCollectionTime = symbolStartTime;
   }
 
   private async collectMarket(
     base: string,
     quote: string,
-    marketConfig: typeof SYMBOLS[0]['markets'][string],
+    marketConfig: (typeof SYMBOLS)[0]['markets'][string],
   ) {
+    const exchangeStatus = this.collectionStatus.symbols[base]?.markets[quote]?.exchanges;
     const pricePromises = marketConfig.exchanges.map(async (exchangeConfig) => {
       const { name, pair } = exchangeConfig;
+      const exchangeStartTime = Date.now();
 
       try {
         // Fetch price from exchange
@@ -70,16 +155,22 @@ export class CollectorService implements OnModuleInit {
         if (!priceData) return null;
 
         // Store individual exchange price
-        await this.updateExchangeRedis(
-          pair,
-          name,
-          priceData.price,
-          priceData.volume,
-        );
+        await this.updateExchangeRedis(pair, name, priceData.price, priceData.volume);
+
+        // Update status on success
+        if (exchangeStatus?.[name]) {
+          exchangeStatus[name].lastCollectionTime = exchangeStartTime;
+          exchangeStatus[name].lastError = undefined;
+        }
 
         return priceData;
       } catch (error) {
         this.logger.warn(`Failed to fetch ${pair} from ${name}: ${error.message}`);
+        // Update error status
+        if (exchangeStatus?.[name]) {
+          exchangeStatus[name].errorCount++;
+          exchangeStatus[name].lastError = error.message;
+        }
         return null;
       }
     });
@@ -97,12 +188,7 @@ export class CollectorService implements OnModuleInit {
     const aggregated = this.aggregator.aggregate(validData);
 
     // Store quote-separated aggregated candle
-    await this.updateQuoteAggregatedRedis(
-      base,
-      quote,
-      aggregated.price,
-      aggregated.sourceCount,
-    );
+    await this.updateQuoteAggregatedRedis(base, quote, aggregated.price, aggregated.sourceCount);
 
     this.logger.debug(
       `${base}:${quote}: ${aggregated.price.toFixed(2)} (${aggregated.algorithm}, ${aggregated.sourceCount} sources)`,

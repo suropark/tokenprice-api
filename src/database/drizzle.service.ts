@@ -15,8 +15,10 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     try {
-      const databaseUrl = this.configService.get<string>('DATABASE_URL') ||
-        'postgresql://localhost:5432/tokenprice';
+      const databaseUrl =
+        this.configService.get<string>('databaseUrl') ||
+        this.configService.get<string>('DATABASE_URL') ||
+        'postgresql://oracle_user:oracle_pass@localhost:5432/oracle_db';
 
       // Create postgres client
       this.client = postgres(databaseUrl, {
@@ -56,7 +58,7 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
 
       // Convert table to hypertable
       await this.db.execute(
-        sql`SELECT create_hypertable('ohlcv_1m', 'time', if_not_exists => TRUE, chunk_time_interval => INTERVAL '1 day')`
+        sql`SELECT create_hypertable('ohlcv_1m', 'time', if_not_exists => TRUE, chunk_time_interval => INTERVAL '1 day')`,
       );
 
       // Set compression policy (compress data older than 7 days)
@@ -64,16 +66,16 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
         sql`ALTER TABLE ohlcv_1m SET (
           timescaledb.compress,
           timescaledb.compress_segmentby = 'symbol'
-        )`
+        )`,
       );
 
       await this.db.execute(
-        sql`SELECT add_compression_policy('ohlcv_1m', INTERVAL '7 days', if_not_exists => TRUE)`
+        sql`SELECT add_compression_policy('ohlcv_1m', INTERVAL '7 days', if_not_exists => TRUE)`,
       );
 
       // Set retention policy (drop chunks older than 1 year)
       await this.db.execute(
-        sql`SELECT add_retention_policy('ohlcv_1m', INTERVAL '1 year', if_not_exists => TRUE)`
+        sql`SELECT add_retention_policy('ohlcv_1m', INTERVAL '1 year', if_not_exists => TRUE)`,
       );
 
       this.logger.log('✅ TimescaleDB hypertable enabled for ohlcv_1m');

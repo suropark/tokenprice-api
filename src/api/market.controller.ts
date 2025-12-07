@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  ValidationPipe,
-  Inject,
-  NotFoundException,
-} from '@nestjs/common';
+import { Controller, Get, Query, ValidationPipe, Inject, NotFoundException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { DrizzleService } from '../database/drizzle.service';
 import { ohlcv1m } from '../database/schema';
@@ -35,13 +28,13 @@ export class MarketController {
         and(
           eq(ohlcv1m.symbol, symbol),
           gte(ohlcv1m.time, new Date(from * 1000)),
-          lte(ohlcv1m.time, new Date(to * 1000))
-        )
+          lte(ohlcv1m.time, new Date(to * 1000)),
+        ),
       )
       .orderBy(asc(ohlcv1m.time));
 
     // 2. Format historical data
-    let result = historical.map((h) => ({
+    const result = historical.map((h) => ({
       time: Math.floor(h.time.getTime() / 1000),
       open: parseFloat(h.open.toString()),
       high: parseFloat(h.high.toString()),
@@ -80,9 +73,7 @@ export class MarketController {
 
   @Get('symbols')
   async getSymbols() {
-    const symbols = await this.drizzle.db
-      .selectDistinct({ symbol: ohlcv1m.symbol })
-      .from(ohlcv1m);
+    const symbols = await this.drizzle.db.selectDistinct({ symbol: ohlcv1m.symbol }).from(ohlcv1m);
 
     return {
       symbols: symbols.map((s) => s.symbol),
@@ -91,9 +82,7 @@ export class MarketController {
   }
 
   @Get('ticker')
-  async getTicker(
-    @Query(new ValidationPipe({ transform: true })) query: TickerQueryDto,
-  ) {
+  async getTicker(@Query(new ValidationPipe({ transform: true })) query: TickerQueryDto) {
     const { base, exchange, quote, includePremium } = query;
 
     // Case 1: Specific exchange
@@ -116,9 +105,7 @@ export class MarketController {
   private async getExchangePrice(base: string, exchange: string) {
     const metadata = getExchangeMetadata(base, exchange);
     if (!metadata) {
-      throw new NotFoundException(
-        `Exchange ${exchange} not found for ${base}`,
-      );
+      throw new NotFoundException(`Exchange ${exchange} not found for ${base}`);
     }
 
     const { quote, pair } = metadata;
@@ -126,9 +113,7 @@ export class MarketController {
     const data = await this.redis.hgetall(key);
 
     if (!data || !data.c) {
-      throw new NotFoundException(
-        `Price not found for ${base} on ${exchange}`,
-      );
+      throw new NotFoundException(`Price not found for ${base} on ${exchange}`);
     }
 
     return {
@@ -148,11 +133,7 @@ export class MarketController {
   /**
    * Get aggregated price for specific quote market
    */
-  private async getQuoteMarket(
-    base: string,
-    quote: string,
-    includePremium: boolean,
-  ) {
+  private async getQuoteMarket(base: string, quote: string, includePremium: boolean) {
     const key = `candle:${base}:${quote}:aggregated`;
     const data = await this.redis.hgetall(key);
 
@@ -176,10 +157,7 @@ export class MarketController {
     if (includePremium && quote === 'KRW') {
       try {
         const usdtMarket = await this.getQuoteMarket(base, 'USDT', false);
-        const premium = await this.fxRateService.calculatePremium(
-          usdtMarket.price,
-          result.price,
-        );
+        const premium = await this.fxRateService.calculatePremium(usdtMarket.price, result.price);
         if (premium) {
           result.premium = premium.percentageString;
         }

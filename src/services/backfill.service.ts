@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import { DrizzleService } from '../database/drizzle.service';
 import { ohlcv1m } from '../database/schema';
 import { BinanceClient, OHLCVData } from '../clients/binance.client';
 import { UpbitClient } from '../clients/upbit.client';
 import { FxRateService } from './fx-rate.service';
+import { StorageService } from './storage.service';
 import { sql } from 'drizzle-orm';
 
 export interface BackfillOptions {
@@ -31,15 +32,19 @@ export class BackfillService {
     private readonly drizzle: DrizzleService,
     private readonly binanceClient: BinanceClient,
     private readonly upbitClient: UpbitClient,
-    private readonly fxRateService: FxRateService,
+    @Optional()
+    private readonly fxRateService?: FxRateService,
+    @Optional()
+    @Inject(forwardRef(() => StorageService))
+    private readonly storageService?: StorageService,
   ) {}
 
   /**
    * Backfill historical data for a symbol
+   * Processes data day by day to reduce memory usage and improve progress tracking
    */
   async backfill(options: BackfillOptions): Promise<BackfillProgress> {
-    const { base, startDate, endDate, exchanges = ['binance', 'upbit'] } =
-      options;
+    const { base, startDate, endDate, exchanges = ['binance', 'upbit'] } = options;
 
     this.logger.log(
       `Starting backfill for ${base} from ${startDate.toISOString()} to ${endDate.toISOString()}`,
@@ -55,6 +60,11 @@ export class BackfillService {
     };
 
     try {
+      // Pause flush operations during backfill (if StorageService is available)
+      if (this.storageService) {
+        this.storageService.setBackfilling(true);
+      }
+
       const startTime = startDate.getTime();
       const endTime = endDate.getTime();
 
@@ -62,43 +72,89 @@ export class BackfillService {
       const totalMinutes = Math.floor((endTime - startTime) / (60 * 1000));
       progress.totalCandles = totalMinutes;
 
-      // Fetch data from exchanges
-      const exchangeData = new Map<string, OHLCVData[]>();
+      // Calculate number of days
+      const totalDays = Math.ceil((endTime - startTime) / (24 * 60 * 60 * 1000));
+      this.logger.log(`Processing ${totalDays} days in daily batches...`);
 
-      if (exchanges.includes('binance')) {
-        this.logger.log(`Fetching Binance data for ${base}/USDT...`);
-        const binanceData = await this.binanceClient.getHistoricalDataRange(
-          `${base}/USDT`,
-          startTime,
-          endTime,
+      // Process day by day
+      let currentDate = new Date(startDate);
+      let dayNumber = 0;
+
+      while (currentDate < endDate) {
+        dayNumber++;
+        const dayStart = new Date(currentDate);
+        dayStart.setHours(0, 0, 0, 0);
+        
+        const dayEnd = new Date(dayStart);
+        dayEnd.setHours(23, 59, 59, 999);
+        
+        // Don't exceed the end date
+        if (dayEnd > endDate) {
+          dayEnd.setTime(endDate.getTime());
+        }
+
+        const dayStartTime = dayStart.getTime();
+        const dayEndTime = dayEnd.getTime();
+
+        this.logger.log(
+          `📅 Processing day ${dayNumber}/${totalDays}: ${dayStart.toISOString().split('T')[0]}`,
         );
-        exchangeData.set('binance', binanceData);
-        this.logger.log(`Fetched ${binanceData.length} candles from Binance`);
-      }
 
-      if (exchanges.includes('upbit')) {
-        this.logger.log(`Fetching Upbit data for ${base}/KRW...`);
-        const upbitData = await this.upbitClient.getHistoricalDataRange(
-          `${base}/KRW`,
-          startTime,
-          endTime,
+        // Fetch data from exchanges for this day
+        const exchangeData = new Map<string, OHLCVData[]>();
+
+        if (exchanges.includes('binance')) {
+          this.logger.log(`  Fetching Binance data for ${base}/USDT...`);
+          const binanceData = await this.binanceClient.getHistoricalDataRange(
+            `${base}/USDT`,
+            dayStartTime,
+            dayEndTime,
+          );
+          exchangeData.set('binance', binanceData);
+          this.logger.log(`  ✅ Fetched ${binanceData.length} candles from Binance`);
+        }
+
+        if (exchanges.includes('upbit')) {
+          this.logger.log(`  Fetching Upbit data for ${base}/KRW...`);
+          const upbitData = await this.upbitClient.getHistoricalDataRange(
+            `${base}/KRW`,
+            dayStartTime,
+            dayEndTime,
+          );
+          exchangeData.set('upbit', upbitData);
+          this.logger.log(`  ✅ Fetched ${upbitData.length} candles from Upbit`);
+        }
+
+        // Aggregate and store data for this day
+        const dayProgress = {
+          ...progress,
+          processedCandles: 0,
+        };
+        await this.aggregateAndStore(base, exchangeData, dayProgress);
+        progress.processedCandles += dayProgress.processedCandles;
+
+        this.logger.log(
+          `  ✅ Day ${dayNumber}/${totalDays} completed: ${dayProgress.processedCandles} candles stored (Total: ${progress.processedCandles}/${progress.totalCandles})`,
         );
-        exchangeData.set('upbit', upbitData);
-        this.logger.log(`Fetched ${upbitData.length} candles from Upbit`);
-      }
 
-      // Aggregate and store data
-      await this.aggregateAndStore(base, exchangeData, progress);
+        // Move to next day
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
 
       progress.status = 'completed';
       this.logger.log(
-        `Backfill completed for ${base}: ${progress.processedCandles} candles processed`,
+        `✅ Backfill completed for ${base}: ${progress.processedCandles} candles processed across ${totalDays} days`,
       );
     } catch (error) {
       progress.status = 'failed';
       progress.error = error.message;
-      this.logger.error(`Backfill failed for ${base}: ${error.message}`);
+      this.logger.error(`❌ Backfill failed for ${base}: ${error.message}`);
       throw error;
+    } finally {
+      // Resume flush operations after backfill (if StorageService is available)
+      if (this.storageService) {
+        this.storageService.setBackfilling(false);
+      }
     }
 
     return progress;
@@ -128,7 +184,13 @@ export class BackfillService {
 
     // Process each time bucket
     const sortedTimes = Array.from(timeMap.keys()).sort((a, b) => a - b);
-    const batchSize = 100; // Insert in batches for better performance
+    const batchSize = 5000; // Increased batch size for better performance with large datasets
+    const logInterval = 10000; // Log progress every 10k records
+    const startTime = Date.now();
+
+    this.logger.log(
+      `Starting to store ${sortedTimes.length} time buckets in batches of ${batchSize}...`,
+    );
 
     for (let i = 0; i < sortedTimes.length; i += batchSize) {
       const batch = sortedTimes.slice(i, i + batchSize);
@@ -174,6 +236,7 @@ export class BackfillService {
 
       // Batch insert with conflict resolution
       if (values.length > 0) {
+        const batchStartTime = Date.now();
         await this.drizzle.db
           .insert(ohlcv1m)
           .values(values as any)
@@ -188,11 +251,34 @@ export class BackfillService {
             } as any,
           });
 
-        this.logger.debug(
-          `Inserted batch ${i / batchSize + 1}: ${values.length} records (${progress.processedCandles}/${progress.totalCandles})`,
-        );
+        const batchDuration = Date.now() - batchStartTime;
+        const elapsed = Date.now() - startTime;
+        const rate = progress.processedCandles / (elapsed / 1000); // records per second
+
+        // Log progress at intervals or for every batch if small dataset
+        if (
+          progress.processedCandles % logInterval < batchSize ||
+          i + batchSize >= sortedTimes.length
+        ) {
+          const percentage = (
+            (progress.processedCandles / progress.totalCandles) *
+            100
+          ).toFixed(1);
+          this.logger.log(
+            `💾 Inserted batch ${Math.floor(i / batchSize) + 1}: ${values.length} records | ` +
+              `Progress: ${progress.processedCandles}/${progress.totalCandles} (${percentage}%) | ` +
+              `Rate: ${rate.toFixed(0)} rec/s | ` +
+              `Batch time: ${batchDuration}ms`,
+          );
+        }
       }
     }
+
+    const totalDuration = Date.now() - startTime;
+    const avgRate = progress.processedCandles / (totalDuration / 1000);
+    this.logger.log(
+      `✅ Storage completed: ${progress.processedCandles} records in ${(totalDuration / 1000).toFixed(1)}s (avg ${avgRate.toFixed(0)} rec/s)`,
+    );
   }
 
   /**

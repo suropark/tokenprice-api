@@ -25,7 +25,7 @@ export const configuration = (): AppConfig => {
       port: process.env.REDIS_PORT || 6379,
       password: process.env.REDIS_PASSWORD || undefined,
     },
-    databaseUrl: process.env.DATABASE_URL,
+    databaseUrl: process.env.DATABASE_URL || 'postgresql://oracle_user:oracle_pass@localhost:5432/oracle_db',
     symbols: process.env.SYMBOLS || 'BTC/USDT,ETH/USDT',
     binanceApiKey: process.env.BINANCE_API_KEY,
     upbitApiKey: process.env.UPBIT_API_KEY,
